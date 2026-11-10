@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+
+# EEG data and generated experiment outputs
+data/
+results/
+/code.zip
+
+.git-backup/
+*.zip
