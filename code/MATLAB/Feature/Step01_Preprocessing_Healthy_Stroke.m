@@ -3,6 +3,12 @@
 % Processes healthy subjects from EDF files and stroke subjects from .mat files
 clear; clc;
 
+% Choose which dataset sections and BMI windows to process.
+processHealthy = true;
+processStroke = false;
+processBMI05s = true;
+processBMI1s = false;
+
 %% Load Configuration
 disp('Loading preprocessing configuration...');
 config = Utility_Functions.get_preprocessing_config();
@@ -10,7 +16,7 @@ disp('Configuration loaded successfully.');
 
 % Extract variables for convenience
 resultsPath = config.resultsPath;
-processedHealthyPath = fullfile(resultsPath, 'healthy_preprocessing');
+processedHealthyPath = config.healthyProcessedPath;
 processedStrokePath = fullfile(resultsPath, 'stroke_preprocessing');
 strokeRawBasePath = config.strokeRawBasePath;
 healthyBasePath = config.healthyBasePath;
@@ -30,12 +36,17 @@ healthyTask2Runs = config.healthyTask2Runs;
 removeChannels = config.removeChannels;
 harmonizedLabels = config.harmonizedLabels;
 
-% Subject BMI Path
-bmiInputPath = config.bmiInputPath;
-bmiWindows = config.bmiWindows;
-
-bmiHealthyPath = fullfile(bmiInputPath, 'healthy');
-bmiStrokePath = fullfile(bmiInputPath, 'stroke');
+% Subject BMI paths
+% Healthy BMI inputs are stored on the G: drive; stroke inputs remain in the project.
+bmiHealthyPath = config.healthyBmiInputPath;
+bmiStrokePath = config.strokeBmiInputPath;
+bmiWindows = {};
+if processBMI05s
+    bmiWindows{end + 1} = [0 0.5];
+end
+if processBMI1s
+    bmiWindows{end + 1} = [0 1.0];
+end
 
 if ~exist(bmiHealthyPath, 'dir')
     mkdir(bmiHealthyPath);
@@ -92,6 +103,7 @@ disp('Filter plots saved successfully.');
 % PROCESS HEALTHY SUBJECTS
 % ========================================================================
 
+if processHealthy
 disp('Starting Healthy Subjects Preprocessing...');
 disp('Processed healthy path:');
 disp(processedHealthyPath);
@@ -435,10 +447,13 @@ else
     disp('Healthy preprocessing complete.');
 end
 
+end % processHealthy
+
 %% ========================================================================
 % PROCESS STROKE SUBJECTS
 % ========================================================================
 
+if processStroke
 disp('Starting Stroke Subjects Preprocessing...');
 disp('Processed stroke path:');
 disp(processedStrokePath);
@@ -666,5 +681,7 @@ else
 
     disp('Stroke preprocessing complete.');
 end
+
+end % processStroke
 
 disp('Combined preprocessing for healthy and stroke subjects is complete.');

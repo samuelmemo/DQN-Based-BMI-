@@ -6,18 +6,30 @@ import torch
 import h5py
 
 
-BMI_input_path = (
+BMI_results_path = (
     Path(__file__).resolve().parents[2]
-    / "data" / "Results" / "BMI_inputs" / "stroke"
+    / "data" / "Results" / "BMI_inputs"
 )
 
 
-def load_dataset(window, return_normalization=False):
+def load_dataset(window, dataset_type="stroke", return_normalization=False):
+    """Load one BMI-input window for either the stroke or healthy subjects."""
+    if dataset_type == "stroke":
+        input_path = BMI_results_path / "stroke"
+        patients = range(1, 51)
+        filename = lambda patient: f"sub-{patient:02d}_BMI_input_{window}.mat"
+    elif dataset_type == "healthy":
+        input_path = BMI_results_path / "healthy"
+        patients = range(1, 110)
+        filename = lambda patient: f"S{patient:03d}_BMI_input_{window}.mat"
+    else:
+        raise ValueError("dataset_type must be 'stroke' or 'healthy'")
+
     eeg_trials, labels, patient_ids = [], [], []
     normalization = []
 
-    for patient in range(1, 51):
-        path = BMI_input_path / f"sub-{patient:02d}_BMI_input_{window}.mat"
+    for patient in patients:
+        path = input_path / filename(patient)
 
         # h5py reads MATLAB v7.3 dimensions as (channels, time, trials).
         with h5py.File(path, "r") as data:

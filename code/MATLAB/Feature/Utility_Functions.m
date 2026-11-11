@@ -12,13 +12,15 @@ classdef Utility_Functions
             % Paths
             config.strokeRawBasePath = "C:\Users\sme319\Documents\RLBMI\data\stroke";
 
-            config.healthyBasePath = "C:\Users\sme319\Documents\RLBMI\data\healthy";
+            config.healthyBasePath = "G:\healthy_data_bmi_2026";
 
             % Single results folder path
             config.resultsPath = "C:\Users\sme319\Documents\RLBMI\data\Results";
 
-            % BMI/QKTD output folder
-            config.bmiInputPath = fullfile(config.resultsPath, "BMI_inputs");
+            % BMI/QKTD input folders. Healthy inputs are stored on the larger G: drive.
+            config.healthyBmiInputPath = "G:\healthy_data_bmi_2026\BMI_inputs_healthy";
+            config.healthyProcessedPath = "G:\healthy_data_bmi_2026\healthy_preprocessing";
+            config.strokeBmiInputPath = fullfile(config.resultsPath, "BMI_inputs", "stroke");
             
             % BMI/QKTD extraction windows relative to MI onset.
             % These control only the saved BMI input files, not Step02 feature extraction.

@@ -21,11 +21,11 @@ from models import EEGNet, ReplayBuffer
 class StrokeAgent:
     """One-step Q-learning: the target is just the observed reward."""
 
-    def __init__(self, chans, samples, batch_size):
+    def __init__(self, chans, samples, batch_size, buffer_capacity=1000):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.policy_net = EEGNet(2, Chans=chans, Samples=samples, kernLength=80).to(self.device)
         self.optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=1e-3)
-        self.memory = ReplayBuffer(1000)
+        self.memory = ReplayBuffer(buffer_capacity)
         self.batch_size = batch_size
 
     def select_action(self, state):
@@ -55,12 +55,16 @@ class StrokeAgent:
 
 
 def train_patient(X, y, epochs=25, runs=10, batch_size=8,
-                  output_dir=None, normalization=None, seed_base=1000):
+                  output_dir=None, normalization=None, seed_base=1000,
+                  initial_model_state=None):
     # The original replay buffer expects NumPy arrays, not PyTorch tensors.
     X = X.numpy()
     y = y.numpy()
+
     # Uncompleted epochs stay missing, rather than looking like failures.
     success_rates = np.full((runs, epochs), np.nan)
+    convergence_slopes = np.full((runs, epochs), np.nan)
+    mean_changes = np.full((runs, epochs), np.nan)
 
     for run in range(runs):
         # Resume at completed-run boundaries, never in the middle of a run.
@@ -68,6 +72,9 @@ def train_patient(X, y, epochs=25, runs=10, batch_size=8,
         if run_path and run_path.exists():
             saved = torch.load(run_path, map_location="cpu", weights_only=False)
             success_rates[run] = saved["success_rates"]
+            if "convergence_slopes" in saved:
+                convergence_slopes[run] = saved["convergence_slopes"]
+                mean_changes[run] = saved["mean_changes"]
             print(f"Skipping completed {run_path}")
             continue
         seed = seed_base + run
@@ -79,9 +86,13 @@ def train_patient(X, y, epochs=25, runs=10, batch_size=8,
         started = time.perf_counter()
         # Start each run with a new network and an empty replay buffer.
         agent = StrokeAgent(chans=X.shape[2], samples=X.shape[3], batch_size=batch_size)
+        if initial_model_state is not None:
+            # Transfer weights into this fresh target-patient run.
+            agent.policy_net.load_state_dict(initial_model_state)
         # Save each epoch's order; -1 marks epochs that were not run.
         trial_orders = np.full((epochs, len(y)), -1, dtype=np.int64)
         actions = np.full((epochs, len(y)), -1, dtype=np.int64)
+        stable_windows = 0
 
         for epoch in range(epochs):
             # Present the patient's trials in a fresh random order each epoch.
@@ -105,16 +116,36 @@ def train_patient(X, y, epochs=25, runs=10, batch_size=8,
             success_rates[run, epoch] = successes / len(y)
             print(f"Run {run + 1}/{runs}, epoch {epoch + 1}/{epochs}: "
                   f"success={success_rates[run, epoch]:.1%}")
-            # Stop once four of the last five epochs reach at least 95% success.
-            if epoch >= 4 and np.count_nonzero(success_rates[run, epoch - 4:epoch + 1] >= 0.95) >= 4:
-                print(f"Early stopping at epoch {epoch + 1}")
-                break
+            
+            # Measure how quickly success is changing over the last five epochs.
+            if epoch >= 4:
+                recent = success_rates[run, epoch - 4:epoch + 1]
+                x = np.arange(len(recent))
+                slope = np.polyfit(x, recent, 1)[0]
+                change = np.mean(np.abs(np.diff(recent)))
+                convergence_slopes[run, epoch] = slope
+                mean_changes[run, epoch] = change
+
+                # A stable window has nearly zero slope and small fluctuations.
+                if abs(slope) <= 0.005 and change <= 0.025:
+                    stable_windows += 1
+                else:
+                    stable_windows = 0
+
+                if stable_windows >= 3:
+                    converged_rate = recent.mean()
+                    print(f"Converged at epoch {epoch + 1} "
+                          f"at {converged_rate:.1%} "
+                          f"(slope={slope:.4f}, mean change={change:.4f})")
+                    break
 
         if run_path:
             # Save atomically: an interrupted write is not mistaken for a finished run.
             checkpoint = {
                 "model_state": {k: v.cpu() for k, v in agent.policy_net.state_dict().items()},
                 "success_rates": success_rates[run], "actions": actions,
+                "convergence_slopes": convergence_slopes[run],
+                "mean_changes": mean_changes[run],
                 "labels": y, "trial_orders": trial_orders, "seed": seed,
                 "normalization": normalization,
                 "epochs_completed": epoch + 1,
@@ -131,7 +162,7 @@ def train_patient(X, y, epochs=25, runs=10, batch_size=8,
 
 if __name__ == "__main__":
     # Use a new experiment folder if you change settings or input files.
-    results = Path(__file__).resolve().parents[2] / "results" / "stroke_dqn_earlystop95_buffer1000_shuffle"
+    results = Path(__file__).resolve().parents[2] / "results" / "stroke_dqn_convergence_buffer1000_shuffle"
     results.mkdir(parents=True, exist_ok=True)
     settings = {
         "epochs": 25, "runs": 10, "batch_size": 8, "kernel_samples": 80,
@@ -139,7 +170,9 @@ if __name__ == "__main__":
         "learning_rate": 0.001, "epsilon": 0.01, "rewards": [1, -1],
         "sampling_rate": 160, "normalization": "per patient/channel over trials and time",
         "metric": "online training success, exploration included",
-        "early_stopping": "4 of last 5 epochs at or above 95% success; maximum 25 epochs",
+        "early_stopping": "convergence only: 5-epoch slope <= 0.005 and mean change <= 0.025 for 3 windows",
+        "convergence_window": 5, "slope_threshold_per_epoch": 0.005,
+        "mean_change_threshold": 0.025, "convergence_patience": 3,
         "torch_version": str(torch.__version__), "numpy_version": np.__version__,
         "device": str(torch.device("cuda" if torch.cuda.is_available() else "cpu")),
         "seed_rule": "patient * 1000 + zero-based run; same seeds for both windows",
@@ -157,8 +190,10 @@ if __name__ == "__main__":
             raise ValueError("Saved code differs. Choose a new results folder.")
         shutil.copyfile(source, destination)
 
-    for window in ("1p0s", "0p5s"):
-        eeg_trials, labels, patient_ids, normalization = load_dataset(window, return_normalization=True)
+    for window in ("0p5s",):
+        eeg_trials, labels, patient_ids, normalization = load_dataset(
+            window, return_normalization=True
+        )
         window_dir = results / window
         window_dir.mkdir(exist_ok=True)
         summary = []

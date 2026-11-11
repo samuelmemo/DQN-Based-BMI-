@@ -9,7 +9,7 @@ matplotlib.use("Agg")  # Save the figure without opening a window.
 import matplotlib.pyplot as plt
 import numpy as np
 
-a = 0
+
 def analyze(results):
     rows = []
     overall = []
@@ -118,5 +118,5 @@ def analyze(results):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--results", type=Path,
-                        default=Path(__file__).resolve().parents[2] / "results" / "stroke_dqn_25epochs")
+                        default=Path(__file__).resolve().parents[2] / "results" / "stroke_dqn_convergence_buffer1000_shuffle")
     analyze(parser.parse_args().results)
